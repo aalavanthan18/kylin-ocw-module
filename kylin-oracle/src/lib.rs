@@ -454,7 +454,7 @@ pub mod pallet {
 		fn send_response_to_parachain(block_number: T::BlockNumber, key:u64) -> DispatchResult {
 			let saved_request = Self::saved_price_feeding_requests(key);
 			match T::XcmSender::send_xcm(
-				(1, Junction::Parachain(saved_request.para_id.into())).into(),
+				MultiLocation::X2(Junction::Parent, Junction::Parachain(saved_request.para_id.into())),
 				Xcm::Transact {
 					origin_type: OriginKind::Native,
 					require_weight_at_most: 1_000,
