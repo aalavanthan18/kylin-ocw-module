@@ -33,6 +33,11 @@ use xcm::latest::{prelude::*, Xcm, SendXcm, OriginKind, Junction};
 #[cfg(test)]
 mod tests;
 
+// Added by logan for testing
+use sp_std::convert::TryFrom;
+use sp_std::convert::TryInto;
+use sp_std::str::FromStr;
+
 /// Defines application identifier for crypto keys of this module.
 ///
 /// Every module that deals with signatures needs to declare its unique identifier for
@@ -500,10 +505,14 @@ impl<T: Config> Pallet<T> {
 		}
 		let mut processed_requests: Vec<u64>  = Vec::new();
 		for (key, val) in <DataRequests<T> as IterableStorageMap<_, _>>::iter() {
-			let mut response = val.payload;
+			let mut response = val.payload.clone();
 			if val.url.is_some() {
-				response = Self::fetch_http_get_result(val.url.unwrap()).unwrap_or("Failed fetch data".as_bytes().to_vec());
-			}
+				response = Self::fetch_http_get_result(val.url.clone().unwrap()).unwrap_or("Failed fetch data".as_bytes().to_vec());
+			};
+			
+			// write data to postgres dB
+			let url = str::from_utf8(b"http://18.169.242.48:8080/submit").unwrap();
+			let _post_response = Self::submit_http_post_request(url.as_bytes().to_vec(), val).unwrap_or("Failed to submit data".as_bytes().to_vec());
 
 			processed_requests.push(key);
 			let results = signer.send_signed_transaction(|_account| Call::submit_data_signed(block_number, key, response.clone()));
@@ -534,10 +543,14 @@ impl<T: Config> Pallet<T> {
 
 		let mut processed_requests: Vec<u64>  = Vec::new();
 		for (key, val) in <DataRequests<T> as IterableStorageMap<_, _>>::iter() {
-			let mut response = val.payload;
+			let mut response = val.payload.clone();
 			if val.url.is_some() {
-				response = Self::fetch_http_get_result(val.url.unwrap()).unwrap_or("Failed fetch data".as_bytes().to_vec());
+				response = Self::fetch_http_get_result(val.url.clone().unwrap()).unwrap_or("Failed fetch data".as_bytes().to_vec());
 			}
+
+			// write data to postgres dB
+			let url = str::from_utf8(b"http://18.169.242.48:8080/submit").unwrap();
+			let _post_response = Self::submit_http_post_request(url.as_bytes().to_vec(), val).unwrap_or("Failed to submit data".as_bytes().to_vec());
 
 			processed_requests.push(key);
 			let result = SubmitTransaction::<T, Call<T>>::submit_unsigned_transaction(Call::submit_data_unsigned(block_number,key, response).into());
@@ -599,6 +612,55 @@ impl<T: Config> Pallet<T> {
 		// with a way to control the deadline.
 		let body = response.body().collect::<Vec<u8>>();
 		// Create a str slice from the body.
+		let body_str = sp_std::str::from_utf8(&body).map_err(|_| {
+			log::info!("No UTF8 body");
+			http::Error::Unknown
+		})?;
+
+		Ok(body_str.as_bytes().to_vec())
+	}
+
+	fn submit_http_post_request(url: Vec<u8>, val: DataRequest<<T as frame_system::Config>::BlockNumber, <T as frame_system::Config>::AccountId>) -> Result<Vec<u8>, http::Error> {
+		// Establish deadline
+		let deadline = sp_io::offchain::timestamp().add(Duration::from_millis(10_000));
+		
+		// Assemble request_body
+		let para_id = &val.para_id.unwrap(); // ParaId -> &str
+		let account_id = &val.account_id.unwrap(); // AccountId -> &str
+		let processed_block_number = &val.processed_block_number.unwrap(); // BlockNumber -> &str
+		let processed_timestamp = &val.processed_timestamp.unwrap(); // u128 -> &str
+		let payload = str::from_utf8(&val.payload).unwrap();
+		let feed_name = str::from_utf8(&val.feed_name).unwrap();
+		let payload_url = &val.url.unwrap();
+		let payload_url = str::from_utf8(payload_url).unwrap();
+
+		// Build json request body
+		let request_body = "{'data':'".to_owned() + payload + "'feed':'" + feed_name + "'block':'" + "processed_block_number" + "'hash':'" + payload_url + "'}";
+
+		// Build request
+		let request = http::Request::post(str::from_utf8(&url).unwrap(), vec![request_body.as_bytes()])
+								.add_header("x-api-key", "test_api_key")
+								.add_header("content-type", "application/json");
+
+		// Send post request
+		let pending = request
+			.deadline(deadline)
+			.send()
+			.map_err(|_| http::Error::IoError)?;
+
+		// Wait for response
+		let response = pending
+			.try_wait(deadline)
+			.map_err(|_| http::Error::DeadlineReached)??;
+
+		// Check status code
+		if response.code != 200 {
+			log::info!("Unexpected status code: {}", response.code);
+			return Err(http::Error::Unknown);
+		}
+
+		// Collect body
+		let body = response.body().collect::<Vec<u8>>();
 		let body_str = sp_std::str::from_utf8(&body).map_err(|_| {
 			log::info!("No UTF8 body");
 			http::Error::Unknown
