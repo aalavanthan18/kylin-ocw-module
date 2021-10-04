@@ -32,10 +32,6 @@ use lite_json::Serialize as JsonSerialize;
 use lite_json::json::{JsonValue, NumberValue};
 use sp_runtime::traits::UniqueSaturatedInto;
 use sp_std::convert::TryFrom;
-use sp_core::hexdisplay::HexDisplay;
-use sp_core::crypto::Ss58Codec;
-use sp_std::hash::Hash;
-use sp_core::{crypto::UncheckedFrom, Bytes};
 
 #[cfg(test)]
 mod tests;
@@ -113,7 +109,7 @@ pub mod pallet	{
 	pub struct Pallet<T>(_);
 
 	#[pallet::hooks]
-	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T>  where T::AccountId: AsRef<[u8]> {
 
 		fn offchain_worker(block_number: T::BlockNumber) {
 			// Note that having logs compiled to WASM may cause the size of the blob to increase
@@ -147,6 +143,8 @@ pub mod pallet	{
 	// Dispatchable functions must be annotated with a weight and must return a DispatchResult.
 	#[pallet::call]
 	impl<T: Config> Pallet<T>
+		where
+			T::AccountId: AsRef<[u8]>
 	{
 
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
@@ -493,7 +491,9 @@ enum TransactionType {
 	None,
 }
 
-impl<T: Config> Pallet<T> {
+impl<T: Config> Pallet<T>
+where
+	T::AccountId: AsRef<[u8]> {
 	fn choose_transaction_type(block_number: T::BlockNumber) -> TransactionType {
 		/// A friendlier name for the error that is going to be returned in case we are in the grace
 		/// period.
