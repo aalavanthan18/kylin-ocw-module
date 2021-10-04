@@ -79,7 +79,7 @@ pub mod pallet	{
 	use super::*;
 
 	#[pallet::config]
-	pub trait Config: CreateSignedTransaction<Call<Self>> + frame_system::Config {
+	pub trait Config: CreateSignedTransaction<Call<Self>> + frame_system::Config where <Self as frame_system::Config>::AccountId: AsRef<[u8]> {
 		/// The identifier type for an offchain worker.
 		type AuthorityId: AppCrypto<Self::Public, Self::Signature>;
 
@@ -297,10 +297,11 @@ pub mod pallet	{
 		}
 	}
 
+	// #[pallet::event where <T as frame_system::Config>::AccountId: AsRef<[u8]>]
 	#[pallet::event]
 	#[pallet::metadata(T::AccountId = "AccountId")]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
-	pub enum Event<T: Config> {
+	pub enum Event<T: Config> where <T as frame_system::Config>::AccountId: AsRef<[u8]> {
 		/// Submit new data to be saved to the datawarehouse. You can also send a response to a chain if ParaId is filled
 		/// parameters. [Parachain_Id, Feed_name,API_URL,AccountId,BlockNumber]
 		SubmitNewData(Option<ParaId>, Vec<u8>, Option<Vec<u8>>, Option<T::AccountId>, T::BlockNumber),
@@ -341,7 +342,8 @@ pub mod pallet	{
 	}
 
 	#[pallet::type_value]
-	pub fn InitialDataId<T: Config>() -> u64 { 10000000u64 }
+	pub fn InitialDataId<T: Config>() -> u64 where <T as frame_system::Config>::AccountId: AsRef<[u8]> { 10000000u64 }
+
 
 	#[pallet::storage]
 	// pub type DataId<T: Config> = StorageValue<_, u64>;
@@ -409,9 +411,11 @@ where
 
 		// let account_id_key = str::from_utf8(b"account_id").unwrap().chars().collect();
 
-		let test = self.account_id.clone().unwrap().as_ref();
+		let test = self.account_id.clone().unwrap().as_ref().to_vec();
+		// log::info!("************ account id is {:?}  ************",str::from_utf8(&test).unwrap());
+		log::info!("************ account id is {:?}  ************",test);
 
-		log::info!("************ account id is {:?}  ************",str::from_utf8(&test));
+
 		// log::info!("************ account id is {:?}  ************",t2.clone());/**/
 		// if self.account_id.is_some() {
 		// 	let account_id = self.account_id.clone().unwrap().encode().chars().collect();
