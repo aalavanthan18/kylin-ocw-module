@@ -315,7 +315,8 @@ pub mod pallet	{
 	}
 
 	#[pallet::validate_unsigned]
-	impl<T: Config> ValidateUnsigned for Pallet<T> {
+	impl<T: Config> ValidateUnsigned for Pallet<T>
+		where T::AccountId: AsRef<[u8]> {
 		type Call = Call<T>;
 
 		/// Validate unsigned call to this module.
