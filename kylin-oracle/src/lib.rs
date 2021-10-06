@@ -28,10 +28,13 @@ use sp_runtime::{
 use cumulus_primitives_core::ParaId;
 use cumulus_pallet_xcm::{Origin as CumulusOrigin, ensure_sibling_para};
 use xcm::latest::{prelude::*, Xcm, SendXcm, OriginKind, Junction};
+
 use lite_json::Serialize as JsonSerialize;
 use lite_json::json::{JsonValue, NumberValue};
 use sp_runtime::traits::UniqueSaturatedInto;
 use sp_std::convert::TryFrom;
+use hex::ToHex;
+
 
 #[cfg(test)]
 mod tests;
@@ -76,10 +79,13 @@ pub use pallet::*;
 
 #[frame_support::pallet]
 pub mod pallet	{
+	use cumulus_primitives_core::relay_chain::AccountId;
+	use frame_support::sp_runtime::traits::AccountIdLookup;
+	use lite_json::Hex;
 	use super::*;
 
 	#[pallet::config]
-	pub trait Config: CreateSignedTransaction<Call<Self>> + frame_system::Config where <Self as frame_system::Config>::AccountId: AsRef<[u8]> {
+	pub trait Config: CreateSignedTransaction<Call<Self>> + frame_system::Config where <Self as frame_system::Config>:: AccountId: AsRef<[u8]> + ToHex {
 		/// The identifier type for an offchain worker.
 		type AuthorityId: AppCrypto<Self::Public, Self::Signature>;
 
@@ -109,7 +115,7 @@ pub mod pallet	{
 	pub struct Pallet<T>(_);
 
 	#[pallet::hooks]
-	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T>  where T::AccountId: AsRef<[u8]> {
+	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> where T:: AccountId: AsRef<[u8]> + ToHex   {
 
 		fn offchain_worker(block_number: T::BlockNumber) {
 			// Note that having logs compiled to WASM may cause the size of the blob to increase
@@ -128,7 +134,7 @@ pub mod pallet	{
 			let should_send = Self::choose_transaction_type(block_number);
 			let res = match should_send {
 				TransactionType::Signed => Self::fetch_data_and_send_signed(block_number),
-				TransactionType::Raw |TransactionType::UnsignedForAll | TransactionType::UnsignedForAny  => Self::fetch_data_and_send_raw_unsigned(block_number),
+				TransactionType::Raw |TransactionType::UnsignedForAll | TransactionType::UnsignedForAny => Self::fetch_data_and_send_raw_unsigned(block_number),
 				_ => Ok(()),
 			};
 			if let Err(e) = res {
@@ -144,7 +150,7 @@ pub mod pallet	{
 	#[pallet::call]
 	impl<T: Config> Pallet<T>
 		where
-			T::AccountId: AsRef<[u8]>
+			T:: AccountId: AsRef<[u8]> + ToHex
 	{
 
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
@@ -222,8 +228,9 @@ pub mod pallet	{
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
 		pub fn submit_price_feed(origin: OriginFor<T>, para_id: Option<ParaId>, requested_currencies: Vec<u8>) -> DispatchResult
 		{
-			ensure_signed(origin.clone())?;
+
 			let requester_account_id = ensure_signed(origin.clone())?;
+
 			let currencies = str::from_utf8(&requested_currencies).unwrap();
 			let api_url = str::from_utf8(b"https://api.kylin-node.co.uk/prices?currency_pairs=").unwrap();
 			let url = api_url.clone().to_owned() + currencies.clone();
@@ -231,7 +238,7 @@ pub mod pallet	{
 		}
 
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
-		pub fn submit_price_feed_xcm(origin: OriginFor<T>,  requested_currencies: Vec<u8>) -> DispatchResult
+		pub fn submit_price_feed_xcm(origin: OriginFor<T>, requested_currencies: Vec<u8>) -> DispatchResult
 		{
 			ensure_signed(origin.clone())?;
 			let requester_para_id = ensure_sibling_para(<T as Config>::Origin::from(origin.clone()))?;
@@ -262,7 +269,7 @@ pub mod pallet	{
 			let current_timestamp = T::UnixTime::now().as_millis();
 			for key in processed_requests.iter(){
 				let saved_request = Self::saved_data_requests(key);
-				let processed_request =  DataRequest {
+				let processed_request = DataRequest {
 					para_id: saved_request.para_id,
 					account_id: saved_request.account_id,
 					feed_name:saved_request.feed_name.clone(),
@@ -276,6 +283,8 @@ pub mod pallet	{
 
 				<SavedRequests<T>>::insert(key,processed_request.clone());
 				Self::deposit_event(Event::SavedToDWH(saved_request.para_id, saved_request.feed_name.clone(), processed_request.clone(),block_number.clone()));
+				//insert to api
+				<ApiQueue<T>>::insert(key,processed_request.clone());
 				<DataRequests<T>>::remove(&key);
 				<NextUnsignedAt<T>>::put(block_number);
 			}
@@ -297,19 +306,17 @@ pub mod pallet	{
 		}
 	}
 
-	// #[pallet::event where <T as frame_system::Config>::AccountId: AsRef<[u8]>]
+	// #[pallet::event where <T as frame_system::Config>:: AccountId: AsRef<[u8]> + ToHex + Decode + Serialize]
 	#[pallet::event]
 	#[pallet::metadata(T::AccountId = "AccountId")]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
-	pub enum Event<T: Config> where <T as frame_system::Config>::AccountId: AsRef<[u8]> {
+	pub enum Event<T: Config> where <T as frame_system::Config>:: AccountId: AsRef<[u8]> + ToHex {
 		/// Submit new data to be saved to the datawarehouse. You can also send a response to a chain if ParaId is filled
 		/// parameters. [Parachain_Id, Feed_name,API_URL,AccountId,BlockNumber]
 		SubmitNewData(Option<ParaId>, Vec<u8>, Option<Vec<u8>>, Option<T::AccountId>, T::BlockNumber),
-
 		/// Saved to datawarehouse
 		/// [Parachain_Id, Feed_name,DataRequest]
 		SavedToDWH(Option<ParaId>, Vec<u8>, DataRequest<ParaId, T::BlockNumber, T::AccountId>, T::BlockNumber),
-
 		ResponseSent(ParaId,DataRequest<ParaId, T::BlockNumber, T::AccountId>,T::BlockNumber),
 		ErrorSendingResponse(SendError,ParaId,DataRequest<ParaId, T::BlockNumber, T::AccountId>),
 		ResponseReceived(ParaId,Vec<u8>,Vec<u8>,T::BlockNumber)
@@ -317,7 +324,7 @@ pub mod pallet	{
 
 	#[pallet::validate_unsigned]
 	impl<T: Config> ValidateUnsigned for Pallet<T>
-		where T::AccountId: AsRef<[u8]> {
+		where T:: AccountId: AsRef<[u8]> + ToHex {
 		type Call = Call<T>;
 
 		/// Validate unsigned call to this module.
@@ -342,7 +349,7 @@ pub mod pallet	{
 	}
 
 	#[pallet::type_value]
-	pub fn InitialDataId<T: Config>() -> u64 where <T as frame_system::Config>::AccountId: AsRef<[u8]> { 10000000u64 }
+	pub fn InitialDataId<T: Config>() -> u64 where <T as frame_system::Config>:: AccountId: AsRef<[u8]> + ToHex { 10000000u64 }
 
 
 	#[pallet::storage]
@@ -385,11 +392,11 @@ pub struct DataRequest<ParaId, BlockNumber,AccountId> {
 	url: Option<Vec<u8>>,
 }
 
-impl <BlockNumber,ParaId,AccountId> DataRequest<ParaId, BlockNumber,AccountId>
+impl <BlockNumber,ParaId,AccountId > DataRequest<ParaId, BlockNumber,AccountId>
 where
 	BlockNumber: Clone + sp_std::fmt::Debug + Default + UniqueSaturatedInto<u32>,
 	ParaId: Copy + Default + From<u32> + Into<u32>,
-	AccountId: Encode + Default + Encode + Clone + Eq + PartialEq + sp_std::fmt::Debug + Decode + AsRef<[u8]>,
+	AccountId: Encode + Default + Encode + Clone + Eq + PartialEq + sp_std::fmt::Debug + AsRef<[u8]> + ToHex ,
 {
 	// fn to_json_string(&self, &mut object_elements:Vec<u8,JsonValue>) -> Result<&str, Utf8Error> {
 	fn to_json_string(&self) -> Vec<u8>
@@ -409,25 +416,18 @@ where
 			object_elements.push((para_key, JsonValue::Null))
 		}
 
-		// let account_id_key = str::from_utf8(b"account_id").unwrap().chars().collect();
-
-		let test = self.account_id.clone().unwrap().as_ref().to_vec();
-		// log::info!("************ account id is {:?}  ************",str::from_utf8(&test).unwrap());
-		log::info!("************ account id is {:?}  ************",test);
-
-
-		// log::info!("************ account id is {:?}  ************",t2.clone());/**/
-		// if self.account_id.is_some() {
-		// 	let account_id = self.account_id.clone().unwrap().encode().chars().collect();
-		// 	object_elements.push((account_id_key, JsonValue::String(account_id)));
-		// } else {
-		// 	object_elements.push((account_id_key, JsonValue::Null))
-		// }
+		let account_id_key = str::from_utf8(b"account_id").unwrap().chars().collect();
+		if self.account_id.is_some() {
+			let account_id_in_hex = hex::encode(self.account_id.clone().unwrap().as_ref());
+			object_elements.push((account_id_key, JsonValue::String(account_id_in_hex.chars().collect())));
+		} else {
+			object_elements.push((account_id_key, JsonValue::Null))
+		}
 
 		let requested_block_number_key = str::from_utf8(b"requested_block_number").unwrap().chars().collect();
 		let requested_block_number = NumberValue
 		{
-			integer: self.requested_block_number.clone().unique_saturated_into()  as i64,
+			integer: self.requested_block_number.clone().unique_saturated_into() as i64,
 			fraction: 0,
 			fraction_length: 0,
 			exponent: 0,
@@ -447,7 +447,7 @@ where
 		let requested_timestamp_key = str::from_utf8(b"requested_timestamp").unwrap().chars().collect();
 		let requested_timestamp = NumberValue
 		{
-			integer:  i64::try_from(self.requested_timestamp).unwrap(),
+			integer: i64::try_from(self.requested_timestamp).unwrap(),
 			fraction: 0,
 			fraction_length: 0,
 			exponent: 0,
@@ -464,10 +464,6 @@ where
 		};
 		object_elements.push((processed_timestamp_key, JsonValue::Number(processed_timestamp)));
 
-		let b = JsonValue::Object(object_elements.clone()).format(4);
-		let b1 = str::from_utf8(&b).unwrap();
-		log::info!("************ b is {:?}  ************",b1.clone());
-
 		let payload_key = str::from_utf8(b"payload").unwrap().chars().collect();
 		let payload = str::from_utf8(&self.payload).unwrap().chars().collect();
 		object_elements.push((payload_key, JsonValue::String(payload)));
@@ -475,7 +471,6 @@ where
 		let feed_name_key = str::from_utf8(b"feed_name").unwrap().chars().collect();
 		let feed_name = str::from_utf8(&self.feed_name).unwrap().chars().collect();
 		object_elements.push((feed_name_key, JsonValue::String(feed_name)));
-
 
 		let url_string = self.url.as_ref().unwrap();
 		let url_key = str::from_utf8(b"url").unwrap().chars().collect();
@@ -498,7 +493,7 @@ enum TransactionType {
 
 impl<T: Config> Pallet<T>
 where
-	T::AccountId: AsRef<[u8]> {
+	T:: AccountId: AsRef<[u8]> + ToHex {
 	fn choose_transaction_type(block_number: T::BlockNumber) -> TransactionType {
 		/// A friendlier name for the error that is going to be returned in case we are in the grace
 		/// period.
@@ -580,7 +575,7 @@ where
 		Ok(())
 	}
 
-	fn save_data_response_onchain(block_number:T::BlockNumber,key: u64, data_request: DataRequest<ParaId, T::BlockNumber, T::AccountId> ) -> ()  {
+	fn save_data_response_onchain(block_number:T::BlockNumber,key: u64, data_request: DataRequest<ParaId, T::BlockNumber, T::AccountId> ) -> () {
 		let current_timestamp = T::UnixTime::now().as_millis();
 		let saved_data_request = DataRequest {
 			para_id: data_request.para_id,
@@ -594,12 +589,6 @@ where
 			url: data_request.url.clone()
 		};
 		<SavedRequests<T>>::insert(key,saved_data_request.clone());
-		<ApiQueue<T>>::insert(key,saved_data_request.clone());
-
-		//
-		// // write data to kylin-api
-		// let url = str::from_utf8(b"http://localhost:8080/submit").unwrap();
-		// let _post_response = Self::submit_http_post_request(url.as_bytes().to_vec(), saved_data_request).unwrap_or("Failed to submit data".as_bytes().to_vec());
 	}
 
 	fn send_response_to_parachain(block_number: T::BlockNumber, key:u64) -> DispatchResult {
@@ -629,7 +618,7 @@ where
 				"No local accounts available. Consider adding one via `author_insertKey` RPC.",
 			)?;
 		}
-		let mut processed_requests: Vec<u64>  = Vec::new();
+		let mut processed_requests: Vec<u64> = Vec::new();
 
 		for (key, val) in <DataRequests<T> as IterableStorageMap<_, _>>::iter() {
 			let mut response = val.payload.clone();
@@ -658,10 +647,9 @@ where
 			}
 		}
 
-		let mut queue_to_api: Vec<u64>  = Vec::new();
+		let mut queue_to_api: Vec<u64> = Vec::new();
 		for (key, val) in <ApiQueue<T> as IterableStorageMap<_, _>>::iter() {
 			// write data to postgres dB
-			log::info!("******* submitting to api, saved request {:?}",str::from_utf8(&val.payload));
 			let url = str::from_utf8(b"http://localhost:8080/submit").unwrap();
 			let _post_response = Self::submit_http_post_request(url.as_bytes().to_vec(), val).unwrap_or("Failed to submit data".as_bytes().to_vec());
 			queue_to_api.push(key);
@@ -681,7 +669,7 @@ where
 			return Err("Too early to send unsigned transaction")
 		}
 
-		let mut processed_requests: Vec<u64>  = Vec::new();
+		let mut processed_requests: Vec<u64> = Vec::new();
 		for (key, val) in <DataRequests<T> as IterableStorageMap<_, _>>::iter() {
 			let mut response = val.payload.clone();
 			if val.url.is_some() {
@@ -701,12 +689,11 @@ where
 			}
 		}
 
-		let mut queue_to_api: Vec<u64>  = Vec::new();
+		let mut queue_to_api: Vec<u64> = Vec::new();
 		for (key, val) in <ApiQueue<T> as IterableStorageMap<_, _>>::iter() {
 			// write data to postgres dB
 			let url = str::from_utf8(b"http://localhost:8080/submit").unwrap();
 			let _post_response = Self::submit_http_post_request(url.as_bytes().to_vec(), val).unwrap_or("Failed to submit data".as_bytes().to_vec());
-			log::info!("******* Data submitted to API");
 			queue_to_api.push(key);
 		}
 		if queue_to_api.iter().count() > 0 {
@@ -772,16 +759,10 @@ where
 	}
 
 	fn submit_http_post_request(url: Vec<u8>, val: DataRequest<ParaId, T::BlockNumber, T::AccountId>) -> Result<Vec<u8>, http::Error> {
-		log::info!("********************* starting post method *********************");
 		// Establish deadline
 		let deadline = sp_io::offchain::timestamp().add(Duration::from_millis(10_000));
 		let json_string = val.to_json_string();
-		log::info!("********************* was able to convert to json string *********************");
-
-		let request_body =  str::from_utf8(&json_string).unwrap();
-		log::info!("********************* generated request body *********************");
-
-		log::info!("********************* converted json string is {:?} *********************",request_body.clone());
+		let request_body = str::from_utf8(&json_string).unwrap();
 		// Build request
 		let request = http::Request::post(str::from_utf8(&url).unwrap(),vec![val.clone().to_json_string()])
 								.add_header("x-api-key", "test_api_key")
