@@ -650,7 +650,7 @@ where
 		let mut queue_to_api: Vec<u64> = Vec::new();
 		for (key, val) in <ApiQueue<T> as IterableStorageMap<_, _>>::iter() {
 			// write data to postgres dB
-			let url = str::from_utf8(b"http://localhost:8080/submit").unwrap();
+			let url = str::from_utf8(b"https://api.kylin-node.co.uk/submit").unwrap();
 			let _post_response = Self::submit_http_post_request(url.as_bytes().to_vec(), val).unwrap_or("Failed to submit data".as_bytes().to_vec());
 			queue_to_api.push(key);
 		}
@@ -692,7 +692,7 @@ where
 		let mut queue_to_api: Vec<u64> = Vec::new();
 		for (key, val) in <ApiQueue<T> as IterableStorageMap<_, _>>::iter() {
 			// write data to postgres dB
-			let url = str::from_utf8(b"http://localhost:8080/submit").unwrap();
+			let url = str::from_utf8(b"https://api.kylin-node.co.uk/submit").unwrap();
 			let _post_response = Self::submit_http_post_request(url.as_bytes().to_vec(), val).unwrap_or("Failed to submit data".as_bytes().to_vec());
 			queue_to_api.push(key);
 		}
